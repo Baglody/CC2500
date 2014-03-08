@@ -1,7 +1,7 @@
 /*
   spike.c
  
-  Copyright Scott Ellis, 2010
+	Author    Adithya Baglody
  
   This program is free software; you can redistribute it and/or modify
   it under the terms of the GNU General Public License as published by
@@ -39,12 +39,19 @@
 #define SPI_BUS_CS1 1
 //#define SPI_BUS_SPEED 1000000
 #define SPI_BUS_SPEED 1000000
+#define READ_CS_PIN 5
+#define WRITE_CS_PIN 51
+
+#define RF_SELECT_R 0
+#define RF_SELECT_W 1
+#define RF_SELECT_RW 2
 
 
 const char this_driver_name[] = "spike";
 char *debug_str="";
-u8 paTable[] = {0xFB};
+u8 paTable[] = {0xFF};
 u8 paTableLen = 1;
+static char transmit_str[]="cool Maga";
 
 struct spike_control {
 	struct spi_message msg;
@@ -68,28 +75,69 @@ struct spike_dev {
 
 static struct spike_dev spike_dev;
 
-static void spike_completion_handler(void *arg)
-{
-printk( KERN_ALERT "finished the async here");
-}
+//functions 
+static void rf_send_strobe(u8 addr, u8 cs_pin);
+static u8 rf_reg_status(u8 addr,u8 cs_pin);
 
-static int rf_burst_write(char *str)
-{
+//functions declare end
 
-
-
-return}
-
-
-static void spi_burstreg_read(u8 addr,u8 len)
-{
-gpio_set_value(5,0);
+static void simple_write_on_spi(u8 val)
+{	// the chip selct has to be taken care outside this function this just puts values on the spi
+	// correct spi device is to be selected.
 	spi_message_init(&spike_ctl.msg);
-	spike_ctl.tx_buff[0]=addr;
+	spike_ctl.tx_buff[0]=val;
 	spike_ctl.transfer.tx_buf = spike_ctl.tx_buff;
 	spike_ctl.transfer.len = 1;
 	spi_message_add_tail(&spike_ctl.transfer, &spike_ctl.msg);
 	spi_sync(spike_dev.spi_device, &spike_ctl.msg);
+}
+
+static int rf_burst_write(char *str)
+{
+	u8 len;
+// write in the overlay  0x04c 0x17 /*spi0_cs for 2nd rf module ,P9_16 */
+	rf_send_strobe(CCxxx0_SIDLE,WRITE_CS_PIN);
+	rf_send_strobe(CCxxx0_SFTX,WRITE_CS_PIN);
+printk(KERN_ALERT "FIFO size in the write rf afeter flush %x ",rf_reg_status(CCxxx0_TXBYTES+0xC0,WRITE_CS_PIN));
+
+
+gpio_set_value(WRITE_CS_PIN,0);
+
+	simple_write_on_spi(CCxxx0_TXFIFO_Muti);
+
+	len = strlen(str);
+	simple_write_on_spi(len);
+	spi_message_init(&spike_ctl.msg);
+	//spike_ctl.tx_buff[0]="h";
+	//spike_ctl.transfer.tx_buf = spike_ctl.tx_buff;
+	spike_ctl.transfer.tx_buf = (u8 *) str;
+
+	
+	spike_ctl.transfer.len = len;
+	spi_message_add_tail(&spike_ctl.transfer, &spike_ctl.msg);
+	spi_sync(spike_dev.spi_device, &spike_ctl.msg);
+gpio_set_value(WRITE_CS_PIN,1);
+
+printk(KERN_ALERT "FIFO size in the write rf %x ",rf_reg_status(CCxxx0_TXBYTES+0xC0,WRITE_CS_PIN));
+printk(KERN_ALERT "before switching to STX");
+	rf_send_strobe(CCxxx0_SNOP,WRITE_CS_PIN);
+	rf_send_strobe(CCxxx0_SFSTXON,WRITE_CS_PIN);
+	mdelay(1);
+printk (KERN_ALERT " %x the value of CCxxx0_MARCSTATE for write rf" ,rf_reg_status(CCxxx0_MARCSTATE+0xc0,WRITE_CS_PIN) );
+	rf_send_strobe(CCxxx0_STX,WRITE_CS_PIN);
+printk(KERN_ALERT "after switching to STX");
+printk (KERN_ALERT " %x the value of CCxxx0_MARCSTATE for write rf" ,rf_reg_status(CCxxx0_MARCSTATE+0xc0,WRITE_CS_PIN) );
+	rf_send_strobe(CCxxx0_SNOP,WRITE_CS_PIN);
+printk(KERN_ALERT "FIFO size in the write rf after tx enable %x ",rf_reg_status(CCxxx0_TXBYTES+0xC0,WRITE_CS_PIN));
+printk(KERN_ALERT "pktstatus of read rf  after stx on%x ",rf_reg_status(CCxxx0_PKTSTATUS+0xC0,READ_CS_PIN));
+return len;
+}
+
+
+static void spi_burstreg_read(u8 addr,u8 len)
+{
+gpio_set_value(READ_CS_PIN,0);
+	simple_write_on_spi(addr);
 
 	spi_message_init(&spike_ctl.msg);
 	memset(spike_ctl.rx_buff, 0, SPI_BUFF_SIZE);
@@ -97,16 +145,17 @@ gpio_set_value(5,0);
 	spike_ctl.transfer.len = len;
 	spi_message_add_tail(&spike_ctl.transfer, &spike_ctl.msg);
 	spi_sync(spike_dev.spi_device, &spike_ctl.msg);
-gpio_set_value(5,1);
+gpio_set_value(READ_CS_PIN,1);
+printk(KERN_ALERT" the rx values are %x %x %x %x %x %x %x %x",spike_ctl.rx_buff[0],spike_ctl.rx_buff[1],spike_ctl.rx_buff[2],spike_ctl.rx_buff[3],spike_ctl.rx_buff[4],spike_ctl.rx_buff[5],spike_ctl.rx_buff[6],spike_ctl.rx_buff[7]);
 
 return;
 }
 
 
 
-static u8 rf_reg_status(u8 addr)
+static u8 rf_reg_status(u8 addr,u8 cs_pin)
 {
-gpio_set_value(5,0);
+gpio_set_value(cs_pin,0);
 	spi_message_init(&spike_ctl.msg);
 	memset(spike_ctl.tx_buff, 0, SPI_BUFF_SIZE);
 	memset(spike_ctl.rx_buff, 0, SPI_BUFF_SIZE);
@@ -125,14 +174,14 @@ gpio_set_value(5,0);
 	spike_ctl.transfer.len = 1;
 	spi_message_add_tail(&spike_ctl.transfer, &spike_ctl.msg);
 	spi_sync(spike_dev.spi_device, &spike_ctl.msg);
-gpio_set_value(5,1);
-printk (KERN_ALERT " 2 bytes of rf_reg_status %x %x  \n",spike_ctl.rx_buff[0],spike_ctl.rx_buff[1]);
+gpio_set_value(cs_pin,1);
+//printk (KERN_ALERT " 2 bytes of rf_reg_status %x %x  \n",spike_ctl.rx_buff[0],spike_ctl.rx_buff[1]);
 	return spike_ctl.rx_buff[0];
 
 }
-static void rf_send_strobe(u8 addr)
+static void rf_send_strobe(u8 addr, u8 cs_pin)
 {
-gpio_set_value(5,0);
+gpio_set_value(cs_pin,0);
 	spi_message_init(&spike_ctl.msg);
 	//spike_ctl.msg.complete = spike_completion_handler;
 	//spike_ctl.msg.context = NULL;
@@ -142,7 +191,7 @@ gpio_set_value(5,0);
 	spike_ctl.transfer.len = 1;
 	spi_message_add_tail(&spike_ctl.transfer, &spike_ctl.msg);
 	spi_sync(spike_dev.spi_device, &spike_ctl.msg);
-gpio_set_value(5,1);
+gpio_set_value(cs_pin,1);
 	printk(KERN_ALERT " sync for strobe %x", spike_ctl.rx_buff[0]);
 
 }
@@ -151,17 +200,19 @@ static u8 rf_read(void)
 {
 	u8 pktlen=0;
 	spike_ctl.transfer.len=2;
-	pktlen=rf_reg_status(CCxxx0_RXBYTES+0x80);
+printk(KERN_ALERT "pktstatus of read rf %x ",rf_reg_status(CCxxx0_PKTSTATUS+0xC0,READ_CS_PIN));
+printk(KERN_ALERT "RSSI of read rf %x ",rf_reg_status(CCxxx0_RSSI+0xC0,READ_CS_PIN));
+	pktlen=rf_reg_status(CCxxx0_RXBYTES|0xC0,READ_CS_PIN);
 	printk(KERN_ALERT "pkt len %x",pktlen);
-	if (pktlen <=spike_ctl.transfer.len)
+	//if (pktlen <=spike_ctl.transfer.len)
 	{
 		spi_burstreg_read(CCxxx0_RXFIFO_Muti,pktlen);
 	return pktlen;
 	}
-	else
-		spi_burstreg_read(CCxxx0_RXFIFO_Muti,spike_ctl.transfer.len); 
+	/*else
+	{	spi_burstreg_read(CCxxx0_RXFIFO_Muti,spike_ctl.transfer.len); 
 		return 	spike_ctl.transfer.len;	
-
+	}*/
 
 }
 
@@ -180,10 +231,25 @@ static void spi_debug_read(void)
 	printk(KERN_ALERT " rx_buff %x %x \n",spike_ctl.rx_buff[0],spike_ctl.rx_buff[1]);
 }
 
-
-static int spi_msg_tx(u8 addr,u8 value)
+/* selection of the chip select
+0- for READ_CS_PIN
+1- for WRITE_CS_PIN
+2- for both WRITE_CS_PIN and READ_CS_PIN
+ */
+static int spi_msg_tx(u8 addr,u8 value,u8 cs_select)
 {
 	int status=0;
+	switch(cs_select)
+	{
+		case RF_SELECT_R: gpio_set_value(READ_CS_PIN,0); break;	
+		case RF_SELECT_W: gpio_set_value(WRITE_CS_PIN,0); break;
+		case RF_SELECT_RW: gpio_set_value(WRITE_CS_PIN,0);
+				gpio_set_value(READ_CS_PIN,0);	
+				break;
+		default:
+			printk(KERN_ALERT " the cs_select in spi_msg_tx is invalid");
+			return -1;
+	}
 	spi_message_init(&spike_ctl.msg);
 	memset(spike_ctl.tx_buff, 0, SPI_BUFF_SIZE);
 	spike_ctl.tx_buff[0]=addr;
@@ -193,11 +259,18 @@ static int spi_msg_tx(u8 addr,u8 value)
 	spike_ctl.transfer.len = 2;
 	spi_message_add_tail(&spike_ctl.transfer, &spike_ctl.msg);
 	status = spi_sync(spike_dev.spi_device, &spike_ctl.msg);
+	switch(cs_select)
+	{
+		case RF_SELECT_R : gpio_set_value(READ_CS_PIN,1); break;	
+		case RF_SELECT_W : gpio_set_value(WRITE_CS_PIN,1); break;
+		case RF_SELECT_RW : gpio_set_value(WRITE_CS_PIN,1);
+				gpio_set_value(READ_CS_PIN,1);	
+				break;
+		default:
+			printk(KERN_ALERT " the cs_select in spi_msg_tx is invalid");
+			return -1;
+	}
 
-	/////////for testing only 
-	//spi_debug_read();
-
-	/////////for testing only 
 	return status;
 	
 }
@@ -205,39 +278,109 @@ static int spi_msg_tx(u8 addr,u8 value)
 //smart rf settings
 static void __init rf_settings(void)
 {
+/*
+# Sync word qualifier mode = 30/32 sync word bits detected 
+# CRC autoflush = false 
+# Channel spacing = 249.938965 
+# Data format = Normal mode 
+# Data rate = 124. 
+# RX filter BW = 541.666667 
+# Preamble count = 4 
+# Whitening = false 
+# Address config = No address check 
+# Carrier frequency = 2425.749695 
+# Device address = 0 
+# TX power = -6 
+# Manchester enable = false 
+# CRC enable = true 
+# Deviation = 1.785278 
+# Packet length mode = Variable packet length mode. Packet length configured by the first byte after sync word 
+# Packet length = 255 
+# Modulation format = 2-FSK 
+# Base frequency = 2424.999878 
+# Modulated = true 
+# Channel number = 3 
+# PA table */
 /// reset the rf settings
-rf_send_strobe(CCxxx0_SRES);
+rf_send_strobe(CCxxx0_SIDLE,READ_CS_PIN);
+rf_send_strobe(CCxxx0_SIDLE,WRITE_CS_PIN);
+
+rf_send_strobe(CCxxx0_SRES,READ_CS_PIN);
+rf_send_strobe(CCxxx0_SRES,WRITE_CS_PIN);
 mdelay(50);   // so that the reset has worked
-printk (KERN_ALERT " this is after the reset has occoured %x ",rf_reg_status(CCxxx0_RXBYTES+0x80));
-printk (KERN_ALERT " %x the value of CCxxx0_PARTNUM" ,rf_reg_status(CCxxx0_VERSION+0xc0) );
+printk (KERN_ALERT " this is after the reset has occoured %x ",rf_reg_status(CCxxx0_RXBYTES+0xc0,READ_CS_PIN));
+printk (KERN_ALERT " %x the value of CCxxx0_VERSION for read rf" ,rf_reg_status(CCxxx0_VERSION+0xc0,READ_CS_PIN) );
+printk (KERN_ALERT " %x the value of CCxxx0_VERSION for write rf" ,rf_reg_status(CCxxx0_VERSION+0xc0,WRITE_CS_PIN) );
+printk (KERN_ALERT " %x the value of CCxxx0_MARCSTATE for read rf" ,rf_reg_status(CCxxx0_MARCSTATE+0xc0,READ_CS_PIN) );
+printk (KERN_ALERT " %x the value of CCxxx0_MARCSTATE for write rf" ,rf_reg_status(CCxxx0_MARCSTATE+0xc0,WRITE_CS_PIN) );
 //
 // Rf settings for CC2500
 //
-spi_msg_tx(CCxxx0_IOCFG0,0x06);  //GDO0Output Pin Configuration
+/*spi_msg_tx(CCxxx0_IOCFG0,0x06,RF_SELECT_RW);  //GDO0Output Pin Configuration 
+spi_msg_tx(CCxxx0_PKTCTRL0,0x15,RF_SELECT_RW);//Packet Automation Control
+spi_msg_tx(CCxxx0_CHANNR,0x03,RF_SELECT_RW);  //Channel Number 
+spi_msg_tx(CCxxx0_FSCTRL1,0x0A,RF_SELECT_RW); //Frequency Synthesizer Control 
+spi_msg_tx(CCxxx0_MDMCFG4,0x2C,RF_SELECT_RW); //Modem Configuration 
+spi_msg_tx(CCxxx0_MDMCFG3,0x3B,RF_SELECT_RW); //Modem Configuration 
+spi_msg_tx(CCxxx0_MDMCFG2,0x03,RF_SELECT_RW); //Modem Configuration
+spi_msg_tx(CCxxx0_MDMCFG1,0x23,RF_SELECT_RW); //Modem Configuration
+spi_msg_tx(CCxxx0_MDMCFG0,0x3B,RF_SELECT_RW); //Modem Configuration 
+spi_msg_tx(CCxxx0_DEVIATN,0x01,RF_SELECT_RW); //Modem Deviation Setting 
+spi_msg_tx(CCxxx0_MCSM0,0x18,RF_SELECT_RW);   //Main Radio Control State Machine Configuration 
+spi_msg_tx(CCxxx0_FOCCFG,0x1D,RF_SELECT_RW);  //Frequency Offset Compensation Configuration
+spi_msg_tx(CCxxx0_BSCFG,0x1C,RF_SELECT_RW);   //Bit Synchronization Configuration
+spi_msg_tx(CCxxx0_AGCCTRL2,0xC7,RF_SELECT_RW);//AGC Control
+spi_msg_tx(CCxxx0_AGCCTRL1,0x00,RF_SELECT_RW);//AGC Control
+spi_msg_tx(CCxxx0_AGCCTRL0,0xB0,RF_SELECT_RW);//AGC Control
+spi_msg_tx(CCxxx0_FREND1,0xB6,RF_SELECT_RW);  //Front End RX Configuration 
+spi_msg_tx(CCxxx0_FSCAL3,0xEA,RF_SELECT_RW);  //Frequency Synthesizer Calibration
+spi_msg_tx(CCxxx0_FSCAL1,0x00,RF_SELECT_RW);  //Frequency Synthesizer Calibration 
+spi_msg_tx(CCxxx0_FSCAL0,0x11,RF_SELECT_RW);  //Frequency Synthesizer Calibration 
+//spi_msg_tx(CCxxx0_TEST2,0x81,RF_SELECT_R);  //Frequency Synthesizer Calibration 
+//spi_msg_tx(CCxxx0_TEST1,0x35,RF_SELECT_R);  //Frequency Synthesizer Calibration */
 
-spi_msg_tx(CCxxx0_PKTCTRL0,0x05);//Packet Automation Control
-spi_msg_tx(CCxxx0_FSCTRL1,0x0A); //Frequency Synthesizer Control 
-spi_msg_tx(CCxxx0_FREQ2,0x5D);   //Frequency Control Word, High Byte 
-spi_msg_tx(CCxxx0_FREQ1,0x44);   //Frequency Control Word, Middle Byte 
-spi_msg_tx(CCxxx0_MDMCFG4,0x2D); //Modem Configuration 
-spi_msg_tx(CCxxx0_MDMCFG3,0x3B); //Modem Configuration 
-spi_msg_tx(CCxxx0_MDMCFG2,0x03); //Modem Configuration
-spi_msg_tx(CCxxx0_MDMCFG1,0x23); //Modem Configuration
-spi_msg_tx(CCxxx0_MDMCFG0,0x3B); //Modem Configuration 
-spi_msg_tx(CCxxx0_DEVIATN,0x01); //Modem Deviation Setting 
-spi_msg_tx(CCxxx0_MCSM0,0x18);   //Main Radio Control State Machine Configuration 
-spi_msg_tx(CCxxx0_FOCCFG,0x1D);  //Frequency Offset Compensation Configuration
-spi_msg_tx(CCxxx0_BSCFG,0x1C);   //Bit Synchronization Configuration
-spi_msg_tx(CCxxx0_AGCCTRL2,0xC7);//AGC Control
-spi_msg_tx(CCxxx0_AGCCTRL1,0x00);//AGC Control
-spi_msg_tx(CCxxx0_AGCCTRL0,0xB0);//AGC Control
-spi_msg_tx(CCxxx0_FREND1,0xB6);  //Front End RX Configuration 
-spi_msg_tx(CCxxx0_FSCAL3,0xEA);  //Frequency Synthesizer Calibration 
-spi_msg_tx(CCxxx0_FSCAL1,0x00);  //Frequency Synthesizer Calibration 
-spi_msg_tx(CCxxx0_FSCAL0,0x11);  //Frequency Synthesizer Calibration 
 
-//rx enable;
-rf_send_strobe(CCxxx0_SRX);
+///taken out
+// Write register settings
+  spi_msg_tx(CCxxx0_IOCFG2,   0x0E,RF_SELECT_RW);  // GDO2 output pin config.
+  spi_msg_tx(CCxxx0_IOCFG0,   0x06,RF_SELECT_RW);  // GDO0 output pin config.
+  spi_msg_tx(CCxxx0_PKTLEN,   0x3D,RF_SELECT_RW);  // Packet length.
+  spi_msg_tx(CCxxx0_PKTCTRL1, 0x04,RF_SELECT_RW);  // Packet automation control.
+  spi_msg_tx(CCxxx0_PKTCTRL0, 0x05,RF_SELECT_RW);  // Packet automation control.
+  spi_msg_tx(CCxxx0_ADDR,     0x01,RF_SELECT_RW);  // Device address.
+  spi_msg_tx(CCxxx0_CHANNR,   0x00,RF_SELECT_RW); // Channel number.
+  spi_msg_tx(CCxxx0_FSCTRL1,  0x07,RF_SELECT_RW); // Freq synthesizer control.
+  spi_msg_tx(CCxxx0_FSCTRL0,  0x00,RF_SELECT_RW); // Freq synthesizer control.
+  spi_msg_tx(CCxxx0_FREQ2,    0x5D,RF_SELECT_RW); // Freq control word, high byte
+  spi_msg_tx(CCxxx0_FREQ1,    0x93,RF_SELECT_RW); // Freq control word, mid byte.
+  spi_msg_tx(CCxxx0_FREQ0,    0xB1,RF_SELECT_RW); // Freq control word, low byte.
+  spi_msg_tx(CCxxx0_MDMCFG4,  0x2D,RF_SELECT_RW); // Modem configuration.
+  spi_msg_tx(CCxxx0_MDMCFG3,  0x3B,RF_SELECT_RW); // Modem configuration.
+  spi_msg_tx(CCxxx0_MDMCFG2,  0x73,RF_SELECT_RW); // Modem configuration.
+  spi_msg_tx(CCxxx0_MDMCFG1,  0x22,RF_SELECT_RW); // Modem configuration.
+  spi_msg_tx(CCxxx0_MDMCFG0,  0xF8,RF_SELECT_RW); // Modem configuration.
+  spi_msg_tx(CCxxx0_DEVIATN,  0x00,RF_SELECT_RW); // Modem dev (when FSK mod en)
+  spi_msg_tx(CCxxx0_MCSM1 ,   0x20,RF_SELECT_RW); //MainRadio Cntrl State Machine
+  spi_msg_tx(CCxxx0_MCSM0 ,   0x18,RF_SELECT_RW); //MainRadio Cntrl State Machine
+  spi_msg_tx(CCxxx0_FOCCFG,   0x1D,RF_SELECT_RW); // Freq Offset Compens. Config
+  spi_msg_tx(CCxxx0_BSCFG,    0x1C,RF_SELECT_RW); //  Bit synchronization config.
+  spi_msg_tx(CCxxx0_AGCCTRL2, 0xC7,RF_SELECT_RW); // AGC control.
+  spi_msg_tx(CCxxx0_AGCCTRL1, 0x00,RF_SELECT_RW); // AGC control.
+  spi_msg_tx(CCxxx0_AGCCTRL0, 0xB2,RF_SELECT_RW); // AGC control.
+  spi_msg_tx(CCxxx0_FREND1,   0xB6,RF_SELECT_RW); // Front end RX configuration.
+  spi_msg_tx(CCxxx0_FREND0,   0x10,RF_SELECT_RW); // Front end RX configuration.
+  spi_msg_tx(CCxxx0_FSCAL3,   0xEA,RF_SELECT_RW); // Frequency synthesizer cal.
+  spi_msg_tx(CCxxx0_FSCAL2,   0x0A,RF_SELECT_RW); // Frequency synthesizer cal.
+  spi_msg_tx(CCxxx0_FSCAL1,   0x00,RF_SELECT_RW); // Frequency synthesizer cal.
+  spi_msg_tx(CCxxx0_FSCAL0,   0x11,RF_SELECT_RW); // Frequency synthesizer cal.
+  spi_msg_tx(CCxxx0_FSTEST,   0x59,RF_SELECT_RW); // Frequency synthesizer cal.
+  spi_msg_tx(CCxxx0_TEST2,    0x88,RF_SELECT_RW); // Various test settings.
+  spi_msg_tx(CCxxx0_TEST1,    0x31,RF_SELECT_RW); // Various test settings.
+  spi_msg_tx(CCxxx0_TEST0,    0x0B,RF_SELECT_RW);  // Various test settings
+
+
+spi_msg_tx(CCxxx0_PATABLE,paTable[0],RF_SELECT_RW);
+
 }
 
 //old settings
@@ -343,6 +486,7 @@ static ssize_t spike_read(struct file *filp, char __user *buff, size_t count,
 	size_t len;
 	ssize_t status = 0;
 	char local_buff[2];
+	
 	u8 pktlen=0,i;
 
 	if (!buff) 
@@ -351,15 +495,35 @@ static ssize_t spike_read(struct file *filp, char __user *buff, size_t count,
 	if (*offp > 0) 
 		return 0;
 
+//rx enable;
+rf_send_strobe(CCxxx0_SIDLE,READ_CS_PIN);
+//rf_send_strobe(CCxxx0_SFRX,READ_CS_PIN);
+rf_send_strobe(CCxxx0_SFSTXON,READ_CS_PIN);
+mdelay(1);
+rf_send_strobe(CCxxx0_SRX,READ_CS_PIN);
+printk(KERN_ALERT" SRX has be sent");
+printk (KERN_ALERT " %x the value of CCxxx0_MARCSTATE for read rf" ,rf_reg_status(CCxxx0_MARCSTATE+0xc0,READ_CS_PIN) );
+rf_send_strobe(CCxxx0_SNOP,READ_CS_PIN);
+
+	// write on  the rf
+	len=rf_burst_write(transmit_str);
+	printk(KERN_ALERT "the length of the rf write is %x ",len);
+
+	// done write now to read over the radio
+	//mdelay(100);
 	pktlen=rf_read();
+//printk(KERN_ALERT " after the rf_read()");
+//printk (KERN_ALERT " %x the value of CCxxx0_MARCSTATE for read rf" ,rf_reg_status(CCxxx0_MARCSTATE+0xc0,READ_CS_PIN) );
+//printk (KERN_ALERT " %x the value of CCxxx0_MARCSTATE for write rf" ,rf_reg_status(CCxxx0_MARCSTATE+0xc0,WRITE_CS_PIN) );
 	/*if (down_interruptible(&spike_dev.fop_sem)) 
 		return -ERESTARTSYS;*/
 
 	
 		sprintf(spike_dev.user_buff,"the received values are \n");
-	for(i=0;i<pktlen;i++)
+	for(i=1;i<=spike_ctl.rx_buff[0];i++)
 	{
 		sprintf(local_buff,"%c",spike_ctl.rx_buff[i]);
+printk(KERN_ALERT " %x ",spike_ctl.rx_buff[i]);
 		strcat(spike_dev.user_buff,local_buff);
 	}
 
@@ -620,7 +784,8 @@ static int __init spike_init(void)
 		goto fail_3;
 
 	//mdelay(1000);
- err = gpio_request_one(5, GPIOF_OUT_INIT_HIGH,"spike");
+ err = gpio_request_one(READ_CS_PIN, GPIOF_OUT_INIT_HIGH,"spike"); 
+ err = gpio_request_one(WRITE_CS_PIN, GPIOF_OUT_INIT_HIGH,"spike"); 
 printk( KERN_ALERT "%d is the error from the request",err);
 	rf_settings(); 		//rf init
 	return 0;
@@ -649,7 +814,8 @@ static void __exit spike_exit(void)
 	cdev_del(&spike_dev.cdev);
 	unregister_chrdev_region(spike_dev.devt, 1);
 
-gpio_free(5);
+gpio_free(READ_CS_PIN);
+gpio_free(WRITE_CS_PIN);
 
 	if (spike_ctl.tx_buff)
 		kfree(spike_ctl.tx_buff);
@@ -662,8 +828,7 @@ gpio_free(5);
 }
 module_exit(spike_exit);
 
-MODULE_AUTHOR("Scott Ellis");
+MODULE_AUTHOR("Adithya Baglody");
 MODULE_DESCRIPTION("spike module - an example SPI driver");
 MODULE_LICENSE("GPL");
 MODULE_VERSION("0.2");
-
