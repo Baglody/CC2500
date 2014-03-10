@@ -51,7 +51,7 @@ const char this_driver_name[] = "spike";
 char *debug_str="";
 u8 paTable[] = {0xFF};
 u8 paTableLen = 1;
-static char transmit_str[]="cool Maga";
+static char transmit_str[USER_BUFF_SIZE];
 
 struct spike_control {
 	struct spi_message msg;
@@ -107,6 +107,7 @@ gpio_set_value(WRITE_CS_PIN,0);
 
 	len = strlen(str);
 	simple_write_on_spi(len);
+	simple_write_on_spi(0x01); // address of the reader
 	spi_message_init(&spike_ctl.msg);
 	//spike_ctl.tx_buff[0]="h";
 	//spike_ctl.transfer.tx_buf = spike_ctl.tx_buff;
@@ -278,29 +279,33 @@ static int spi_msg_tx(u8 addr,u8 value,u8 cs_select)
 //smart rf settings
 static void __init rf_settings(void)
 {
-/*
-# Sync word qualifier mode = 30/32 sync word bits detected 
-# CRC autoflush = false 
-# Channel spacing = 249.938965 
-# Data format = Normal mode 
-# Data rate = 124. 
-# RX filter BW = 541.666667 
-# Preamble count = 4 
-# Whitening = false 
-# Address config = No address check 
-# Carrier frequency = 2425.749695 
-# Device address = 0 
-# TX power = -6 
-# Manchester enable = false 
-# CRC enable = true 
-# Deviation = 1.785278 
-# Packet length mode = Variable packet length mode. Packet length configured by the first byte after sync word 
-# Packet length = 255 
-# Modulation format = 2-FSK 
-# Base frequency = 2424.999878 
-# Modulated = true 
-# Channel number = 3 
-# PA table */
+// Product = CC2500
+// Crystal accuracy = 40 ppm
+// X-tal frequency = 26 MHz
+// RF output power = 0 dBm
+// RX filterbandwidth = 540.000000 kHz
+// Deviation = 0.000000
+// Return state:  Return to RX state upon leaving either TX or RX
+// Datarate = 250.000000 kbps
+// Modulation = (7) MSK
+// Manchester enable = (0) Manchester disabled
+// RF Frequency = 2433.000000 MHz
+// Channel spacing = 199.950000 kHz
+// Channel number = 0
+// Optimization = Sensitivity
+// Sync mode = (3) 30/32 sync word bits detected
+// Format of RX/TX data = (0) Normal mode, use FIFOs for RX and TX
+// CRC operation = (1) CRC calculation in TX and CRC check in RX enabled
+// Forward Error Correction = (0) FEC disabled
+// Length configuration = (1) Variable length packets, packet length configured by the first received byte after sync word.
+// Packetlength = 255
+// Preamble count = (2)  4 bytes
+// Append status = 1
+// Address check = Address check and 0 (0x00) broadcast
+// CRC autoflush = true
+// Device address = 1
+// GDO0 signal selection = ( 0x06 ) Asserts when sync word has been sent / received, and de-asserts at the end of the packet
+// GDO2 signal selection = ( 0x0E ) Carrier sense. High if RSSI level is above threshold
 /// reset the rf settings
 rf_send_strobe(CCxxx0_SIDLE,READ_CS_PIN);
 rf_send_strobe(CCxxx0_SIDLE,WRITE_CS_PIN);
@@ -313,43 +318,17 @@ printk (KERN_ALERT " %x the value of CCxxx0_VERSION for read rf" ,rf_reg_status(
 printk (KERN_ALERT " %x the value of CCxxx0_VERSION for write rf" ,rf_reg_status(CCxxx0_VERSION+0xc0,WRITE_CS_PIN) );
 printk (KERN_ALERT " %x the value of CCxxx0_MARCSTATE for read rf" ,rf_reg_status(CCxxx0_MARCSTATE+0xc0,READ_CS_PIN) );
 printk (KERN_ALERT " %x the value of CCxxx0_MARCSTATE for write rf" ,rf_reg_status(CCxxx0_MARCSTATE+0xc0,WRITE_CS_PIN) );
-//
-// Rf settings for CC2500
-//
-/*spi_msg_tx(CCxxx0_IOCFG0,0x06,RF_SELECT_RW);  //GDO0Output Pin Configuration 
-spi_msg_tx(CCxxx0_PKTCTRL0,0x15,RF_SELECT_RW);//Packet Automation Control
-spi_msg_tx(CCxxx0_CHANNR,0x03,RF_SELECT_RW);  //Channel Number 
-spi_msg_tx(CCxxx0_FSCTRL1,0x0A,RF_SELECT_RW); //Frequency Synthesizer Control 
-spi_msg_tx(CCxxx0_MDMCFG4,0x2C,RF_SELECT_RW); //Modem Configuration 
-spi_msg_tx(CCxxx0_MDMCFG3,0x3B,RF_SELECT_RW); //Modem Configuration 
-spi_msg_tx(CCxxx0_MDMCFG2,0x03,RF_SELECT_RW); //Modem Configuration
-spi_msg_tx(CCxxx0_MDMCFG1,0x23,RF_SELECT_RW); //Modem Configuration
-spi_msg_tx(CCxxx0_MDMCFG0,0x3B,RF_SELECT_RW); //Modem Configuration 
-spi_msg_tx(CCxxx0_DEVIATN,0x01,RF_SELECT_RW); //Modem Deviation Setting 
-spi_msg_tx(CCxxx0_MCSM0,0x18,RF_SELECT_RW);   //Main Radio Control State Machine Configuration 
-spi_msg_tx(CCxxx0_FOCCFG,0x1D,RF_SELECT_RW);  //Frequency Offset Compensation Configuration
-spi_msg_tx(CCxxx0_BSCFG,0x1C,RF_SELECT_RW);   //Bit Synchronization Configuration
-spi_msg_tx(CCxxx0_AGCCTRL2,0xC7,RF_SELECT_RW);//AGC Control
-spi_msg_tx(CCxxx0_AGCCTRL1,0x00,RF_SELECT_RW);//AGC Control
-spi_msg_tx(CCxxx0_AGCCTRL0,0xB0,RF_SELECT_RW);//AGC Control
-spi_msg_tx(CCxxx0_FREND1,0xB6,RF_SELECT_RW);  //Front End RX Configuration 
-spi_msg_tx(CCxxx0_FSCAL3,0xEA,RF_SELECT_RW);  //Frequency Synthesizer Calibration
-spi_msg_tx(CCxxx0_FSCAL1,0x00,RF_SELECT_RW);  //Frequency Synthesizer Calibration 
-spi_msg_tx(CCxxx0_FSCAL0,0x11,RF_SELECT_RW);  //Frequency Synthesizer Calibration 
-//spi_msg_tx(CCxxx0_TEST2,0x81,RF_SELECT_R);  //Frequency Synthesizer Calibration 
-//spi_msg_tx(CCxxx0_TEST1,0x35,RF_SELECT_R);  //Frequency Synthesizer Calibration */
 
-
-///taken out
 // Write register settings
   spi_msg_tx(CCxxx0_IOCFG2,   0x0E,RF_SELECT_RW);  // GDO2 output pin config.
   spi_msg_tx(CCxxx0_IOCFG0,   0x06,RF_SELECT_RW);  // GDO0 output pin config.
   spi_msg_tx(CCxxx0_PKTLEN,   0x3D,RF_SELECT_RW);  // Packet length.
-  spi_msg_tx(CCxxx0_PKTCTRL1, 0x04,RF_SELECT_RW);  // Packet automation control.
+  spi_msg_tx(CCxxx0_PKTCTRL1, 0x07,RF_SELECT_RW);  // Packet automation control. worked with 0x04
   spi_msg_tx(CCxxx0_PKTCTRL0, 0x05,RF_SELECT_RW);  // Packet automation control.
-  spi_msg_tx(CCxxx0_ADDR,     0x01,RF_SELECT_RW);  // Device address.
+  spi_msg_tx(CCxxx0_ADDR,     0x01,RF_SELECT_R);  // Device address. READ device address is 01
+  spi_msg_tx(CCxxx0_ADDR,     0x02,RF_SELECT_W);  // Device address.WRITE device address is 02
   spi_msg_tx(CCxxx0_CHANNR,   0x00,RF_SELECT_RW); // Channel number.
-  spi_msg_tx(CCxxx0_FSCTRL1,  0x07,RF_SELECT_RW); // Freq synthesizer control.
+  spi_msg_tx(CCxxx0_FSCTRL1,  0x05,RF_SELECT_RW); // Freq synthesizer control.
   spi_msg_tx(CCxxx0_FSCTRL0,  0x00,RF_SELECT_RW); // Freq synthesizer control.
   spi_msg_tx(CCxxx0_FREQ2,    0x5D,RF_SELECT_RW); // Freq control word, high byte
   spi_msg_tx(CCxxx0_FREQ1,    0x93,RF_SELECT_RW); // Freq control word, mid byte.
@@ -383,102 +362,26 @@ spi_msg_tx(CCxxx0_PATABLE,paTable[0],RF_SELECT_RW);
 
 }
 
-//old settings
-/*static void __init rf_settings(void)
+static ssize_t spike_write(struct file *filp, char __user *buff, size_t count,
+			loff_t *offp)
 {
-// Product = CC2500
-// Crystal accuracy = 40 ppm
-// X-tal frequency = 26 MHz
-// RF output power = 0 dBm
-// RX filterbandwidth = 540.000000 kHz
-// Deviation = 0.000000
-// Return state:  Return to RX state upon leaving either TX or RX
-// Datarate = 250.000000 kbps
-// Modulation = (7) MSK
-// Manchester enable = (0) Manchester disabled
-// RF Frequency = 2433.000000 MHz
-// Channel spacing = 199.950000 kHz
-// Channel number = 0
-// Optimization = Sensitivity
-// Sync mode = (3) 30/32 sync word bits detected
-// Format of RX/TX data = (0) Normal mode, use FIFOs for RX and TX
-// CRC operation = (1) CRC calculation in TX and CRC check in RX enabled
-// Forward Error Correction = (0) FEC disabled
-// Length configuration = (1) Variable length packets, packet length configured by the first received byte after sync word.
-// Packetlength = 255
-// Preamble count = (2)  4 bytes
-// Append status = 1
-// Address check = (0) No address check
-// FIFO autoflush = 0
-// Device address = 0
-// GDO0 signal selection = ( 6) Asserts when sync word has been sent / received, and de-asserts at the end of the packet
-// GDO2 signal selection = (11) Serial Clock
-
-    // Write register settings
-    spi_msg_tx(CCxxx0_IOCFG2,   0x0B);  // GDO2 output pin config.
-    spi_msg_tx(CCxxx0_IOCFG0,   0x06);  // GDO0 output pin config.
-    spi_msg_tx(CCxxx0_PKTLEN,   0xFF);  // Packet length.
-    spi_msg_tx(CCxxx0_PKTCTRL1, 0x05);  // Packet automation control.
-    spi_msg_tx(CCxxx0_PKTCTRL0, 0x05);  // Packet automation control.
-    spi_msg_tx(CCxxx0_ADDR,     0x01);  // Device address.
-    spi_msg_tx(CCxxx0_CHANNR,   0x00); // Channel number.
-    spi_msg_tx(CCxxx0_FSCTRL1,  0x07); // Freq synthesizer control.
-    spi_msg_tx(CCxxx0_FSCTRL0,  0x00); // Freq synthesizer control.
-    spi_msg_tx(CCxxx0_FREQ2,    0x5D); // Freq control word, high byte
-    spi_msg_tx(CCxxx0_FREQ1,    0x93); // Freq control word, mid byte.
-    spi_msg_tx(CCxxx0_FREQ0,    0xB1); // Freq control word, low byte.
-    spi_msg_tx(CCxxx0_MDMCFG4,  0x2D); // Modem configuration.
-    spi_msg_tx(CCxxx0_MDMCFG3,  0x3B); // Modem configuration.
-    spi_msg_tx(CCxxx0_MDMCFG2,  0x73); // Modem configuration.
-    spi_msg_tx(CCxxx0_MDMCFG1,  0x22); // Modem configuration.
-    spi_msg_tx(CCxxx0_MDMCFG0,  0xF8); // Modem configuration.
-    spi_msg_tx(CCxxx0_DEVIATN,  0x00); // Modem dev (when FSK mod en)
-    spi_msg_tx(CCxxx0_MCSM1 ,   0x3F); //MainRadio Cntrl State Machine
-    spi_msg_tx(CCxxx0_MCSM0 ,   0x18); //MainRadio Cntrl State Machine
-    spi_msg_tx(CCxxx0_FOCCFG,   0x1D); // Freq Offset Compens. Config
-    spi_msg_tx(CCxxx0_BSCFG,    0x1C); //  Bit synchronization config.
-    spi_msg_tx(CCxxx0_AGCCTRL2, 0xC7); // AGC control.
-    spi_msg_tx(CCxxx0_AGCCTRL1, 0x00); // AGC control.
-    spi_msg_tx(CCxxx0_AGCCTRL0, 0xB2); // AGC control.
-    spi_msg_tx(CCxxx0_FREND1,   0xB6); // Front end RX configuration.
-    spi_msg_tx(CCxxx0_FREND0,   0x10); // Front end RX configuration.
-    spi_msg_tx(CCxxx0_FSCAL3,   0xEA); // Frequency synthesizer cal.
-    spi_msg_tx(CCxxx0_FSCAL2,   0x0A); // Frequency synthesizer cal.
-    spi_msg_tx(CCxxx0_FSCAL1,   0x00); // Frequency synthesizer cal.
-    spi_msg_tx(CCxxx0_FSCAL0,   0x11); // Frequency synthesizer cal.
-    spi_msg_tx(CCxxx0_FSTEST,   0x59); // Frequency synthesizer cal.
-    spi_msg_tx(CCxxx0_TEST2,    0x88); // Various test settings.
-    spi_msg_tx(CCxxx0_TEST1,    0x31); // Various test settings.
-    spi_msg_tx(CCxxx0_TEST0,    0x0B);  // Various test settings.
-
-
-    // PATABLE (0 dBm output power)
-    spi_msg_tx(CCxxx0_PATABLE,paTable[0]);
-
-return;
-
-}*/ 
-
-/*static int spike_do_one_message(void)
-{
-	int status;
-
-	if (down_interruptible(&spike_dev.spi_sem))
-		return -ERESTARTSYS;
-
-	if (!spike_dev.spi_device) {
-		up(&spike_dev.spi_sem);
-		return -ENODEV;
+	ssize_t retval;
+	int len;
+	/*if (down_interruptible(&fop_sem))
+		return -ERESTARTSYS;*/
+	if (copy_from_user(transmit_str, buff, count)) {
+                 retval = -EFAULT;
+                 goto out;
 	}
+	len=rf_burst_write(transmit_str);
+	printk(KERN_ALERT "the length of the rf write is %x ",len);
+	*offp += len;
+	retval = len;
+ out:
+         //up(&fop_sem);
+         return retval;
 
-	//spike_prepare_spi_message();
-
-	status = spi_sync(spike_dev.spi_device, &spike_ctl.msg);
-	
-	up(&spike_dev.spi_sem);
-
-	return status;	
-}*/
+}
 
 static ssize_t spike_read(struct file *filp, char __user *buff, size_t count,
 			loff_t *offp)
@@ -495,19 +398,10 @@ static ssize_t spike_read(struct file *filp, char __user *buff, size_t count,
 	if (*offp > 0) 
 		return 0;
 
-//rx enable;
-rf_send_strobe(CCxxx0_SIDLE,READ_CS_PIN);
-//rf_send_strobe(CCxxx0_SFRX,READ_CS_PIN);
-rf_send_strobe(CCxxx0_SFSTXON,READ_CS_PIN);
-mdelay(1);
-rf_send_strobe(CCxxx0_SRX,READ_CS_PIN);
-printk(KERN_ALERT" SRX has be sent");
-printk (KERN_ALERT " %x the value of CCxxx0_MARCSTATE for read rf" ,rf_reg_status(CCxxx0_MARCSTATE+0xc0,READ_CS_PIN) );
-rf_send_strobe(CCxxx0_SNOP,READ_CS_PIN);
 
 	// write on  the rf
-	len=rf_burst_write(transmit_str);
-	printk(KERN_ALERT "the length of the rf write is %x ",len);
+	/*len=rf_burst_write(transmit_str);
+	printk(KERN_ALERT "the length of the rf write is %x ",len);*/
 
 	// done write now to read over the radio
 	//mdelay(100);
@@ -520,13 +414,13 @@ rf_send_strobe(CCxxx0_SNOP,READ_CS_PIN);
 
 	
 		sprintf(spike_dev.user_buff,"the received values are \n");
-	for(i=1;i<=spike_ctl.rx_buff[0];i++)
+	for(i=2;i<=spike_ctl.rx_buff[0];i++)
 	{
 		sprintf(local_buff,"%c",spike_ctl.rx_buff[i]);
 printk(KERN_ALERT " %x ",spike_ctl.rx_buff[i]);
 		strcat(spike_dev.user_buff,local_buff);
 	}
-
+	strcat(spike_dev.user_buff,"\n"); // adding a new line
 		
 	len = strlen(spike_dev.user_buff);
  
@@ -552,16 +446,25 @@ static int spike_open(struct inode *inode, struct file *filp)
 {	
 	int status = 0;
 
-	if (down_interruptible(&spike_dev.fop_sem)) 
-		return -ERESTARTSYS;
+	/*if (down_interruptible(&spike_dev.fop_sem)) 
+		return -ERESTARTSYS;*/
 
 	if (!spike_dev.user_buff) {
 		spike_dev.user_buff = kmalloc(USER_BUFF_SIZE, GFP_KERNEL);
 		if (!spike_dev.user_buff) 
 			status = -ENOMEM;
 	}	
+//rx enable;
+rf_send_strobe(CCxxx0_SIDLE,READ_CS_PIN);
+//rf_send_strobe(CCxxx0_SFRX,READ_CS_PIN);
+rf_send_strobe(CCxxx0_SFSTXON,READ_CS_PIN);
+mdelay(1);
+rf_send_strobe(CCxxx0_SRX,READ_CS_PIN);
+printk(KERN_ALERT" SRX has be sent");
+printk (KERN_ALERT " %x the value of CCxxx0_MARCSTATE for read rf" ,rf_reg_status(CCxxx0_MARCSTATE+0xc0,READ_CS_PIN) );
+rf_send_strobe(CCxxx0_SNOP,READ_CS_PIN);
 
-	up(&spike_dev.fop_sem);
+	//up(&spike_dev.fop_sem);
 
 	return status;
 }
@@ -716,6 +619,7 @@ spike_init_error:
 static const struct file_operations spike_fops = {
 	.owner =	THIS_MODULE,
 	.read = 	spike_read,
+	.write = 	spike_write,
 	.open =		spike_open,	
 };
 
